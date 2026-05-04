@@ -1,0 +1,67 @@
+# ===========================================================================
+# DENY BY DEFAULT
+#
+# This repo backs up markdown-only Claude Code customisations (agents and
+# skills).  Only the file types explicitly listed below are ever tracked.
+#
+# What is NEVER backed up here:
+#   - ~/.claude.json          (contains GitHub PAT — lives outside ~/.claude/)
+#   - settings.json / settings.local.json  (machine-specific, may hold tokens)
+#   - Any JSON file           (Claude Code stores credentials in JSON)
+#   - Any binary or compiled file
+# ===========================================================================
+
+# Block every file and directory by default.
+*
+
+# Re-allow directories so git traverses into subdirectories.
+!*/
+
+# Allowed file types — authored markdown and shell scripts only.
+!*.md
+!*.sh
+!.gitignore
+
+# ---------------------------------------------------------------------------
+# Belt-and-suspenders: explicit denials for credentials and machine config.
+# These are already covered by the * rule above, but listed here to make the
+# intent auditable and to guard against future gitignore restructuring.
+# ---------------------------------------------------------------------------
+
+# JSON — Claude Code stores API keys, PATs, and MCP credentials in JSON.
+*.json
+settings.json
+settings.local.json
+
+# Environment files
+*.env
+.env.*
+
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+id_ecdsa
+id_ecdsa.*
+
+# Generic credential patterns
+*.token
+*_token*
+*secret*
+*credential*
+*password*
+*api_key*
+*apikey*
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
