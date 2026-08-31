@@ -338,6 +338,127 @@ PDF_OCCUPANCY_PAGE = 1
 PDF_ECONOMICS_PAGE = 2
 ```
 ---
+Rule 8 — Document System Dependencies Separately from requirements.txt
+`requirements.txt` is ONLY for pip-installable Python packages. It must never be
+treated as the complete list of what a project needs to run.
+Any dependency installed through a system package manager — `apt`, `brew`, `dnf`,
+`apk`, etc. — is NOT a pip package and does NOT belong in `requirements.txt`.
+Common examples: `poppler-utils` (provides the `pdftotext` binary), `ffmpeg`,
+`imagemagick`, `tesseract-ocr`, `wkhtmltopdf`, `libpq`. These must be documented
+explicitly in `README.md` under a dedicated **System Dependencies** heading.
+Never silently assume a system tool is present.
+Why this matters: a project that "works on my machine" only because a system tool
+happened to be pre-installed will fail on a fresh machine with a *confusing* error.
+A missing system binary surfaces as a runtime `FileNotFoundError` / `OSError` from
+`subprocess` — NOT an `ImportError` — so the failure does not point at a dependency
+at all. Worse, `pip install -r requirements.txt` completing successfully gives a
+false sense that every dependency is satisfied when it is not.
+WRONG — assume the binary is on PATH, document nothing:
+```python
+# requirements.txt lists openpyxl, so "deps are handled"... except pdftotext
+# comes from poppler-utils (apt), is undocumented, and is absent on a fresh box.
+import subprocess
+
+def get_page_text(pdf_path: str, page: int) -> str:
+    result = subprocess.run(
+        ["pdftotext", "-layout", "-f", str(page), "-l", str(page), pdf_path, "-"],
+        capture_output=True, text=True, check=True,
+    )
+    # On a machine without poppler-utils this raises:
+    #   FileNotFoundError: [Errno 2] No such file or directory: 'pdftotext'
+    # which looks nothing like a missing-dependency error.
+    return result.stdout
+```
+RIGHT — document the system dependency in README.md AND handle its absence with a
+clear, actionable error:
+```markdown
+<!-- README.md -->
+## System Dependencies
+This project shells out to `pdftotext`, a compiled binary from **poppler-utils**.
+It is installed via the OS package manager, NOT pip — there is no PyPI equivalent.
+`pip install -r requirements.txt` alone is NOT sufficient.
+
+    sudo apt install -y poppler-utils      # Debian/Ubuntu
+    brew install poppler                   # macOS
+```
+```python
+import shutil
+import subprocess
+
+def get_page_text(pdf_path: str, page: int) -> str:
+    if shutil.which("pdftotext") is None:
+        raise RuntimeError(
+            "`pdftotext` not found on PATH. Install poppler-utils "
+            "(`sudo apt install -y poppler-utils`) — see README 'System Dependencies'."
+        )
+    try:
+        result = subprocess.run(
+            ["pdftotext", "-layout", "-f", str(page), "-l", str(page), pdf_path, "-"],
+            capture_output=True, text=True, check=True,
+        )
+    except FileNotFoundError as exc:  # PATH changed between check and call
+        raise RuntimeError(
+            "`pdftotext` is missing — install poppler-utils (see README)."
+        ) from exc
+    return result.stdout
+```
+Rule of thumb: if installing it requires `apt`/`brew`/`dnf` rather than `pip`, it
+goes in README.md under **System Dependencies**, never in `requirements.txt`.
+---
+Rule 9 — Unit Tests Are Part of the Code, Not a Follow-Up
+Any function you write or change ships with tests. Not "later", not "if there's time",
+not only for big projects. A one-off script that decides a number someone acts on
+needs tests more than a library nobody runs.
+
+Use `pytest`. It goes in `requirements-dev.txt`, NOT `requirements.txt` — test tooling
+is not a runtime dependency:
+```bash
+pip install pytest
+pip freeze | grep -iE "^(pytest|pluggy|iniconfig|Pygments)==" > requirements-dev.txt
+```
+```
+my-project/
+├── requirements.txt          # runtime deps
+├── requirements-dev.txt      # pytest and friends
+└── tests/
+    └── test_<module>.py
+```
+
+What to test — prioritise by what it costs to be wrong:
+1. **Silent wrong answers.** Code that returns a plausible but incorrect value without
+   raising. A crash gets noticed; a wrong total gets filed. Test these first.
+2. **Boundaries of a heuristic.** If a threshold separates two cases, test just below,
+   just above, and the realistic near-miss that must NOT trip it.
+3. **Failure paths.** Missing file, missing column, malformed row — assert it raises
+   the specific exception, not that it "handles" it.
+4. **Round-trips.** What you write, you must be able to read back unchanged.
+
+```python
+def test_continuation_page_without_total_does_not_count():
+    # A real two-page receipt: one receipt, not two.
+    assert count_receipt_pages([PAGE_WITH_TOTAL, PAGE_OF_TERMS]) == 1
+
+def test_missing_column_raises():
+    with pytest.raises(ValueError, match="missing column"):
+        load_records_from_csv(bad_csv, folder)
+```
+
+Use realistic fixtures. Derive test data from actual inputs the code has seen — real
+OCR noise, real vendor formats — not tidy invented strings. Tidy fixtures pass while
+production fails.
+
+Verify the tests can fail. A test that passes against broken code is worse than no
+test, because it certifies the bug. After writing them, deliberately break the logic
+and confirm the specific test fails:
+```bash
+# mutate the source, run, confirm the RIGHT test fails, then restore
+pytest -q
+```
+If a mutation passes, the test is decorative — strengthen it or delete it.
+
+Never report code as working on the strength of tests you have not run. Run them,
+paste the count, and say plainly if any fail.
+---
 Quick Setup Checklist
 When starting any new Python task, run through this:
 ```bash
@@ -360,5 +481,10 @@ pip freeze > requirements.txt
 # 6. Create .gitignore if it doesn't exist
 printf "venv/\n__pycache__/\n*.pyc\n.env\n*.egg-info/\n" >> .gitignore
 
-# 7. Now write code
+# 7. Set up tests (Rule 9) — before writing code, not after
+pip install pytest
+pip freeze | grep -iE "^(pytest|pluggy|iniconfig|Pygments)==" > requirements-dev.txt
+mkdir -p tests
+
+# 8. Now write code — and its tests, in the same pass
 ```
